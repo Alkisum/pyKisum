@@ -4,9 +4,14 @@ import wx
 import os
 from mutagen.mp3 import MP3
  
-class MainFrame(wx.Frame):
+class GUI(wx.Frame):
     def __init__(self, parent, title):
         wx.Frame.__init__(self, parent, title=title)
+        
+        #Temporary path of the music library (waiting for the feature to choose graphically the library in the file system) 
+        self.librarylocation = '/media/data/Programmation/pyKisum/MusicSample'
+        #Temporary path of the last MP3 files displayed in the list (waiting for the feature to read a config file where this path will be written)
+        self.lastpathselected = '/media/data/Programmation/pyKisum/MusicSample/Airbourne/No Guts. No Glory'
         
         ''''''''' Top '''''''''
         topsizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -21,7 +26,6 @@ class MainFrame(wx.Frame):
         buttonpanel.SetSizer(buttonsizer)
         topsizer.Add(buttonpanel, 1, wx.EXPAND | wx.ALL, 10)
         
-        
         ''''''''' Bottom '''''''''        
         bottomsizer = wx.BoxSizer(wx.VERTICAL)
         treesizer = wx.BoxSizer(wx.VERTICAL)
@@ -33,7 +37,7 @@ class MainFrame(wx.Frame):
 
         #Create the Tree containing the file system arborescence
         self.tree = wx.TreeCtrl(treepanel, 1, wx.DefaultPosition, (-1,-1), wx.TR_HIDE_ROOT|  wx.TR_HAS_BUTTONS)
-        self.StartBuildFromDir(librarylocation)        
+        self.StartBuildFromDir(self.librarylocation)        
         self.tree.Bind(wx.EVT_TREE_SEL_CHANGED, self.OnSelChanged, id=1)
 
         #Create the List containing the MP3 files
@@ -77,11 +81,11 @@ class MainFrame(wx.Frame):
             fullpath = os.path.join(directory, child)
             if self.IsMP3(fullpath):
                 fileitemid = self.tree.AppendItem(parent, child)
-                if fullpath == lastpathselected:
+                if fullpath == self.lastpathselected:
                         self.tree.SelectItem(fileitemid)
             elif os.path.isdir(fullpath):
                 diritemid = self.tree.AppendItem(parent, child)
-                if fullpath == lastpathselected:
+                if fullpath == self.lastpathselected:
                     self.tree.SelectItem(diritemid)
                 newfullpath = os.path.join(directory, child)
                 self.BuildChildrenFromDir(diritemid, newfullpath)
@@ -96,7 +100,7 @@ class MainFrame(wx.Frame):
             fullpath.insert(0, directory)
             fullpath.insert(0, '/')
             item = self.tree.GetItemParent(item)
-        fullpath.insert(0, librarylocation)
+        fullpath.insert(0, self.librarylocation)
         fullpath = ''.join(fullpath)
         if os.path.isdir(fullpath):
             self.DisplayAllChildren(fullpath)
@@ -106,10 +110,10 @@ class MainFrame(wx.Frame):
     '''Initialize the list with the last MP3 files displayed in this list'''
     def InitList(self):       
         self.list.DeleteAllItems()
-        if os.path.isdir(lastpathselected):
-            self.DisplayAllChildren(lastpathselected)
-        elif self.IsMP3(lastpathselected):
-            self.InsertTagsIntoList(lastpathselected)
+        if os.path.isdir(self.lastpathselected):
+            self.DisplayAllChildren(self.lastpathselected)
+        elif self.IsMP3(self.lastpathselected):
+            self.InsertTagsIntoList(self.lastpathselected)
     
     '''Insert all the children of a directory into the list'''
     def DisplayAllChildren(self, directory):
@@ -145,13 +149,4 @@ class MainFrame(wx.Frame):
     '''Check if the file is a MP3 file'''
     def IsMP3(self, filepath):
         extension = os.path.splitext(filepath)[1]
-        return extension == ".mp3"
-            
-#Temporary path of the music library (waiting for the feature to choose graphically the library in the file system) 
-librarylocation = '/media/data/Programmation/pyKisum/MusicSample'
-#Temporary path of the last MP3 files displayed in the list (waiting for the feature to read a config file where this path will be written)
-lastpathselected = '/media/data/Programmation/pyKisum/MusicSample/Airbourne/No Guts. No Glory'
-app = wx.App(False)
-frame = MainFrame(None, "pyKisum")
-frame.Show()
-app.MainLoop()
+        return extension == ".mp3"       
