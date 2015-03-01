@@ -1,42 +1,23 @@
-'''
-Created on 12 mars 2014
+#!/usr/bin/env python
+# coding=utf-8
+"""
+Module to handle the playlist.
+The playlist is updated according to items selected in the Tree.
+"""
+__author__ = "Alkisum"
 
-@author: Alkisum
-'''
 
-import wx
-
-
-class Playlist():
-    """"Class which controls the playlist."""
+class Playlist(object):
+    """Class which controls the playlist."""
 
     def __init__(self):
         """Playlist constructor."""
         self.item_list = []
         self.playlist = []
 
-    def update_item_list(self, item, selected_items, item_is_selected):
-        """Update the item list."""
-        if len(selected_items) == 0:
-            del self.item_list[:]
-        elif len(selected_items) == 1:
-            if wx.GetKeyState(wx.WXK_CONTROL):
-                if len(self.item_list) > 1:
-                    self.item_list = [x for x in self.item_list if x != item]
-                else:
-                    del self.item_list[:]
-                    self.item_list.append(item)
-            else:
-                del self.item_list[:]
-                self.item_list.append(item)
-        else:
-            if item_is_selected:
-                self.item_list.append(item)
-            else:
-                self.item_list = [x for x in self.item_list if x != item]
-
     def update_playlist(self, song_list):
-        """Update the playlist."""
+        """Update the playlist.
+        :param song_list: list of songs to set"""
         del self.playlist[:]
         self.playlist = song_list
 

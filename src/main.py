@@ -1,4 +1,9 @@
 #!/usr/bin/env python
+# coding=utf-8
+"""
+Main module that initializes the program.
+"""
+__author__ = "Alkisum"
 
 import wx
 from src.model import database

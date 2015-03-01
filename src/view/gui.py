@@ -1,27 +1,37 @@
 #!/usr/bin/env python
+# coding=utf-8
+"""
+Module to handle the Graphical User Interface.
+"""
+__author__ = "Alkisum"
 
 import wx
 import os
 import ConfigParser
-import pygame
 import math
-from mutagen.mp3 import MP3
-from wx.lib.pubsub import Publisher  # pylint: disable-msg=E0611
+from wx.lib.pubsub import setuparg1
+from wx.lib.pubsub import pub as publisher
 from ..utils import config
 from ..controller import playlist
+from src.view import menubar
 
 
 ID_BUTTON_PREVIOUS = wx.NewId()
 ID_BUTTON_PLAY = wx.NewId()
 ID_BUTTON_NEXT = wx.NewId()
-ID_MENU_ADD_LIBRARY = wx.NewId()
-ID_MENU_REFRESH_LIBRARY = wx.NewId()
 ID_GAUGE = wx.NewId()
 ID_PANEL_BUTTONS = wx.NewId()
 ID_PANEL_LIST = wx.NewId()
 ID_PANEL_TREE = wx.NewId()
 ID_LIST = wx.NewId()
 ID_TREE = wx.NewId()
+ID_ACC_SELECT_ALL = wx.NewId()
+
+FRAME_WIDTH = 800
+FRAME_HEIGHT = 600
+SASH_POSITION = FRAME_WIDTH / 4
+LIST_WIDTH = FRAME_WIDTH - SASH_POSITION - 29
+LIST_FIXED_SIZE = 204
 
 
 class GUI(wx.Frame):
@@ -36,129 +46,116 @@ class GUI(wx.Frame):
         self.playlist = playlist.Playlist()
         # Load configuration file
         conf = config.Config()
-        self.configfilepath = conf.get_config_file()
-        self.configparser = ConfigParser.ConfigParser()
-        self.configparser.read(self.configfilepath)
-        self.library_location = self.configparser.get("session", "library")
-        self.saved_playlist = self.configparser.get("session", "playlist")
+        self.config_file_path = conf.get_config_file()
+        self.config_parser = ConfigParser.ConfigParser()
+        self.config_parser.read(self.config_file_path)
+        self.library_location = self.config_parser.get("session", "library")
+        self.saved_playlist = self.config_parser.get("session", "playlist")
 
         # Build the GUI
-        wx.Frame.__init__(self, parent, title=title)
+        wx.Frame.__init__(self, parent, title=title,
+                          size=(FRAME_WIDTH, FRAME_HEIGHT))
+
+        # Menu Bar
+        menu_bar = menubar.MenuBar()
+        self.SetMenuBar(menu_bar.get_menu_bar())
 
         # Status Bar
-        self.statusbar = self.CreateStatusBar()
-        self.statusbar.SetFieldsCount(3)
-        self.statusbar.SetStatusWidths([-3, -2, -2])
+        self.status_bar = self.CreateStatusBar()
+        self.status_bar.SetFieldsCount(3)
+        self.status_bar.SetStatusWidths([-3, -2, -2])
         # Progress Bar
         self.gauge_counter = 0
-        self.gauge = wx.Gauge(self.statusbar, ID_GAUGE,
+        self.gauge = wx.Gauge(self.status_bar, ID_GAUGE,
                               style=wx.GA_HORIZONTAL | wx.GA_SMOOTH)
-        rect = self.statusbar.GetFieldRect(2)
+        rect = self.status_bar.GetFieldRect(2)
         self.gauge.SetPosition((rect.x + 2, rect.y + 2))
         self.gauge.SetSize((rect.width - 3, rect.height - 3))
         self.gauge.Hide()
         # Create a Publisher listener for the progress bar
-        Publisher().subscribe(self.update_gauge, ("update_gauge"))
-
-        # Menu Bar
-        # Set up the menu bar
-        musicmenu = wx.Menu()
-        refresh_library = musicmenu.Append(ID_MENU_REFRESH_LIBRARY,
-                                           "Refresh the library",
-                                           " Refresh the library")
-        add_library = musicmenu.Append(ID_MENU_ADD_LIBRARY, "Add a library",
-                                       " Add a library")
-        musicmenu.AppendSeparator()
-        exit_program = musicmenu.Append(wx.ID_EXIT, "Exit",
-                                        " Terminate the program")
-        # Create the menu bar
-        menubar = wx.MenuBar()
-        menubar.Append(musicmenu, "&Music")
-        self.SetMenuBar(menubar)
-
-        # Top (control buttons)
-        topsizer = wx.BoxSizer(wx.HORIZONTAL)
-        buttonsizer = wx.BoxSizer(wx.HORIZONTAL)
-        buttonpanel = wx.Panel(self, ID_PANEL_BUTTONS)
-        self.firstsongplayed = True
-        self.songisplaying = False
-        self.previousbutton = wx.BitmapButton(buttonpanel, ID_BUTTON_PREVIOUS,
-                                              wx.Bitmap('./img/previous.png'),
-                                              size=(40, 40))
-        self.playbutton = wx.BitmapButton(buttonpanel, ID_BUTTON_PLAY,
-                                          wx.Bitmap('./img/play.png'),
-                                          size=(40, 40))
-        self.nextbutton = wx.BitmapButton(buttonpanel, ID_BUTTON_NEXT,
-                                          wx.Bitmap('./img/next.png'),
-                                          size=(40, 40))
-        buttonsizer.Add(self.previousbutton)
-        buttonsizer.Add(self.playbutton, 0, wx.LEFT | wx.RIGHT, 5)
-        buttonsizer.Add(self.nextbutton, 0, wx.RIGHT, 5)
-        buttonpanel.SetSizer(buttonsizer)
-        topsizer.Add(buttonpanel, 1, wx.EXPAND | wx.ALL, 10)
+        publisher.subscribe(self.update_gauge, "update_gauge")
 
         # Bottom (tree and list)
-        bottomsizer = wx.BoxSizer(wx.VERTICAL)
-        treesizer = wx.BoxSizer(wx.VERTICAL)
-        listsizer = wx.BoxSizer(wx.VERTICAL)
+        bottom_sizer = wx.BoxSizer(wx.VERTICAL)
+        tree_sizer = wx.BoxSizer(wx.VERTICAL)
+        list_sizer = wx.BoxSizer(wx.VERTICAL)
         splitter = wx.SplitterWindow(self, style=wx.SP_LIVE_UPDATE)
-        treepanel = wx.Panel(splitter, ID_PANEL_TREE, style=wx.SUNKEN_BORDER)
-        listpanel = wx.Panel(splitter, ID_PANEL_LIST, style=wx.SUNKEN_BORDER)
-        splitter.SplitVertically(treepanel, listpanel)
+        tree_panel = wx.Panel(splitter, ID_PANEL_TREE, style=wx.SUNKEN_BORDER)
+        list_panel = wx.Panel(splitter, ID_PANEL_LIST, style=wx.SUNKEN_BORDER)
+        splitter.SplitVertically(tree_panel, list_panel)
+        splitter.SetSashPosition(SASH_POSITION)
 
         # Create the List containing the MP3 files
-        self.list = wx.ListCtrl(listpanel, ID_LIST, size=(-1, -1),
+        self.list = wx.ListCtrl(list_panel, ID_LIST, size=(-1, -1),
                                 style=wx.LC_REPORT)
         self.init_list()
 
         # Create the Tree containing the artists, albums and songs
-        self.tree = wx.TreeCtrl(treepanel, ID_TREE, wx.DefaultPosition,
+        self.tree = wx.TreeCtrl(tree_panel, ID_TREE, wx.DefaultPosition,
                                 (-1, -1), wx.TR_HIDE_ROOT | wx.TR_HAS_BUTTONS |
                                 wx.TR_MULTIPLE)
 
-        treesizer.Add(self.tree, 1, wx.EXPAND)
-        listsizer.Add(self.list, 1, wx.EXPAND)
-        treepanel.SetSizer(treesizer)
-        listpanel.SetSizer(listsizer)
-        bottomsizer.Add(splitter, 1,
-                        wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+        tree_sizer.Add(self.tree, 1, wx.EXPAND)
+        list_sizer.Add(self.list, 1, wx.EXPAND)
+        tree_panel.SetSizer(tree_sizer)
+        list_panel.SetSizer(list_sizer)
+        bottom_sizer.Add(splitter, 1,
+                         wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP | wx.BOTTOM, 10)
+
+        # Shortcuts
+        self.Bind(wx.EVT_MENU, self.on_select_all, id=ID_ACC_SELECT_ALL)
+        acc_table = wx.AcceleratorTable([(wx.ACCEL_CTRL, ord('A'),
+                                          ID_ACC_SELECT_ALL)])
+        self.SetAcceleratorTable(acc_table)
 
         # Binds
         self.Bind(wx.EVT_SIZE, self.on_size)
-        self.Bind(wx.EVT_MENU, self.on_refresh_library, refresh_library)
-        self.Bind(wx.EVT_MENU, self.on_add_library, add_library)
-        self.Bind(wx.EVT_MENU, self.on_close, exit_program)
+        self.Bind(wx.EVT_MENU, self.on_refresh_library,
+                  menu_bar.get_refresh_library_item())
+        self.Bind(wx.EVT_MENU, self.on_add_folder,
+                  menu_bar.get_add_folder_item())
+        self.Bind(wx.EVT_MENU, self.on_close,
+                  menu_bar.get_exit_item())
         self.Bind(wx.EVT_CLOSE, self.on_close)
         self.Bind(wx.EVT_SPLITTER_SASH_POS_CHANGING,
                   self.resize_list, splitter)
-        '''self.Bind(wx.EVT_BUTTON, self.OnChangeSong, self.previousbutton)
-        self.Bind(wx.EVT_BUTTON, self.OnPlay, self.playbutton)
-        self.Bind(wx.EVT_BUTTON, self.OnChangeSong, self.nextbutton)
-        self.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self.OnPlay, self.list)'''
-        self.Bind(wx.EVT_TREE_SEL_CHANGED, self.on_sel_changed, self.tree)
+        self.Bind(wx.EVT_TREE_SEL_CHANGED,
+                  self.on_sel_changed, self.tree)
 
         # Frame
-        framesizer = wx.BoxSizer(wx.VERTICAL)
-        framesizer.Add(topsizer, 0)
-        framesizer.Add(bottomsizer, 1, wx.EXPAND)
-        self.SetSizer(framesizer)
+        frame_sizer = wx.BoxSizer(wx.VERTICAL)
+        # frame_sizer.Add(top_sizer, 0)
+        frame_sizer.Add(bottom_sizer, 1, wx.EXPAND)
+        self.SetSizer(frame_sizer)
 
         self.display_last_session()
 
+        # Flags
+        self.select = True
+        self.size_cnt = 0
+
     def on_size(self, event):
-        """Update the position and size of the status bar gauge."""
-        # wxListCtrl:
+        """Update the position and size of the status bar gauge.
+        :param event: event that triggers the function"""
+        # List
         self.resize_list("")
         # Gauge
-        rect = self.statusbar.GetFieldRect(2)
+        rect = self.status_bar.GetFieldRect(2)
         self.gauge.SetPosition((rect.x + 2, rect.y + 2))
         self.gauge.SetSize((rect.width - 3, rect.height - 3))
         # EVT_SIZE propagation stopped -> need to reload the layout
         self.Layout()
 
     def resize_list(self, event):
-        """Resize the list's columns when its container is resized."""
-        list_width = self.list.GetSize()[0] - 204
+        """Resize the list's columns when its container is re-sized.
+        :param event: event that triggers the function"""
+        # Skip the 2 first size events
+        if self.size_cnt < 2:
+            list_width = LIST_WIDTH - LIST_FIXED_SIZE
+            self.size_cnt += 1
+        # After the 2 first events, get new list size
+        else:
+            list_width = self.list.GetSize()[0] - LIST_FIXED_SIZE
         self.list.SetColumnWidth(0, 20)
         self.list.SetColumnWidth(1, 30)
         self.list.SetColumnWidth(2, math.trunc(list_width * (40.0 / 100)))
@@ -168,12 +165,13 @@ class GUI(wx.Frame):
         self.list.SetColumnWidth(6, 80)
 
     def on_close(self, event):
-        """Save the configuration and close the programme."""
-        configfile = open(self.configfilepath, 'w')
-        self.configparser.set("session", "library", self.library_location)
-        self.configparser.set("session", "playlist",
-                              self.playlist.get_playlist_id_songs())
-        self.configparser.write(configfile)
+        """Save the configuration and close the programme.
+        :param event: event that triggers the function"""
+        configfile = open(self.config_file_path, 'w')
+        self.config_parser.set("session", "library", self.library_location)
+        self.config_parser.set("session", "playlist",
+                               self.playlist.get_playlist_id_songs())
+        self.config_parser.write(configfile)
         self.Destroy()
 
     def init_list(self):
@@ -198,81 +196,30 @@ class GUI(wx.Frame):
         if self.library_location:
             self.build_tree()
         if self.saved_playlist:
-            #Parse the string: delete "[" and "]"
+            # Parse the string: delete "[" and "]"
             song_id_list = self.saved_playlist[1:-1].split(", ")
             songs_to_add = []
             for song_id in song_id_list:
                 songs_to_add.append(
-                        self.lib.get_data_from_saved_playlist(song_id))
+                    self.lib.get_data_from_saved_playlist(song_id))
             self.playlist.update_playlist(songs_to_add)
             self.display_playlist()
 
-    '''def OnPlay(self, event):
-        """Play and pause mp3."""
-        if self.firstsongplayed or (not event.GetId() is ID_BUTTON_PLAY):
-            pygame.mixer.init()
-            pygame.mixer.music.load(self.GetSongToPlay("play"))
-            pygame.mixer.music.play()
-            #self.QueuePlaylist(self.GetSongToPlay("play"))
-            self.firstsongplayed = False
-            self.songisplaying = True
-            self.playbutton.SetBitmapLabel(wx.Bitmap('./img/pause.png'))
-        else:
-            if self.songisplaying:
-                pygame.mixer.music.pause()
-                self.songisplaying = False
-                self.playbutton.SetBitmapLabel(wx.Bitmap('./img/play.png'))
-            else:
-                pygame.mixer.music.unpause()
-                self.songisplaying = True
-                self.playbutton.SetBitmapLabel(wx.Bitmap('./img/pause.png'))'''
-
-    '''def OnChangeSong(self, event):
-        """Play the previous or next mp3."""
-        if self.firstsongplayed:
-            pygame.mixer.init()
-            if event.GetId() is ID_BUTTON_PREVIOUS:
-                pygame.mixer.music.load(self.GetSongToPlay("previous"))
-            if event.GetId() is ID_BUTTON_NEXT:
-                pygame.mixer.music.load(self.GetSongToPlay("next"))
-            pygame.mixer.music.play()
-            self.firstsongplayed = False
-            self.songisplaying = True
-        else:
-            if event.GetId() is ID_BUTTON_PREVIOUS:
-                pygame.mixer.music.load(self.GetSongToPlay("previous"))
-            if event.GetId() is ID_BUTTON_NEXT:
-                pygame.mixer.music.load(self.GetSongToPlay("next"))
-            pygame.mixer.music.play()
-        self.playbutton.SetBitmapLabel(wx.Bitmap('./img/pause.png'))'''
-
-    '''def GetSongToPlay(self, button):
-        """Get the index of the song to play."""
-        if button is "play":
-            index = self.list.GetFirstSelected()
-        elif button is "previous":
-            index = self.list.GetFirstSelected() - 1
-        elif button is "next":
-            index = self.list.GetFirstSelected() + 1
-        self.list.Select(self.list.GetFirstSelected(), False)
-        if index is -1 or index > len(self.pathlist) - 1:
-            index = 0       # if no song selected, play the first in the list
-        self.list.Select(index, True)
-        return self.pathlist[index]'''
-
     def on_refresh_library(self, event):
-        """Refresh the library."""
-        if (self.library_location):
+        """Refresh the library.
+        :param event: event that triggers the function"""
+        if self.library_location:
             self.gauge_counter = 0
             self.gauge.SetRange(len(os.listdir(self.library_location)))
             self.gauge.Show()
             self.lib.add_library(self.library_location)
             self.build_tree()
-            self.statusbar.SetStatusText("", 1)
+            self.status_bar.SetStatusText("", 1)
             self.gauge.Hide()
 
-    def on_add_library(self, event):
-        """Add a library by opening a file chooser dialog."""
+    def on_add_folder(self, event):
+        """Add a library by opening a file chooser dialog.
+        :param event: event that triggers the function"""
         dlg = wx.DirDialog(self, "Choose a directory:",
                            style=wx.DD_DEFAULT_STYLE | wx.DD_NEW_DIR_BUTTON)
         if dlg.ShowModal() == wx.ID_OK:
@@ -282,7 +229,7 @@ class GUI(wx.Frame):
             self.gauge.Show()
             self.lib.add_library(self.library_location)
             self.build_tree()
-            self.statusbar.SetStatusText("", 1)
+            self.status_bar.SetStatusText("", 1)
             self.gauge.Hide()
         dlg.Destroy()
 
@@ -310,29 +257,29 @@ class GUI(wx.Frame):
                     if song[1] != "":
                         track = song[1] + " - "
                     item_song = self.tree.AppendItem(
-                            item_album, track + song[2])
+                        item_album, track + song[2])
                     self.tree.SetItemPyData(item_song, ['Song', song[0]])
 
     def update_gauge(self, msg):
-        """Update gauge when loading a library."""
+        """Update gauge when loading a library.
+        :param msg: message to display in the status bar"""
         self.gauge_counter += 1
-        self.statusbar.SetStatusText(msg.data, 1)
+        self.status_bar.SetStatusText(msg.data, 1)
         self.gauge.SetValue(self.gauge_counter)
 
     def on_sel_changed(self, event):
-        """Update list when the selection in the tree changes."""
-        # Update the tree selected item list
-        self.playlist.update_item_list(event.GetItem(),
-                                       self.tree.GetSelections(),
-                                       self.tree.IsSelected(event.GetItem()))
-        # Update the playlist
-        songs_to_add = []
-        for item in self.playlist.get_item_list():
-            songs_to_add.append(self.lib.get_data_from_selected_item(
-                    self.tree.GetItemPyData(item)))
-        self.playlist.update_playlist(songs_to_add)
-        # Display the updated playlist in the list
-        self.display_playlist()
+        """Update list when the selection in the tree changes.
+        :param event: event that triggers the function"""
+        if self.select:
+            # Update the playlist
+            songs_to_add = []
+            for item in self.tree.GetSelections():
+                if not self.tree.IsSelected(self.tree.GetItemParent(item)):
+                    songs_to_add.append(self.lib.get_data_from_selected_item(
+                                        self.tree.GetItemPyData(item)))
+            self.playlist.update_playlist(songs_to_add)
+            # Display the updated playlist in the list
+            self.display_playlist()
 
     def display_playlist(self):
         """Display the playlist in the list."""
@@ -349,46 +296,21 @@ class GUI(wx.Frame):
                 self.list.SetStringItem(idx, 6, song[6])
                 idx += 1
 
-    '''def DisplayAllChildren(self, directory):
-        """"Insert all the children of a directory into the list."""
-        dirlisting = os.listdir(directory)
-        for child in dirlisting:
-            fullpath = os.path.join(directory, child)
-            if os.path.isdir(fullpath):
-                self.DisplayAllChildren(fullpath)
-            elif self.IsMP3(fullpath):
-                self.InsertTagsIntoList(fullpath)
-
-    def InsertTagsIntoList(self, mp3filepath):
-        """Insert the tags of a MP3 file into the list."""
-        numitems = self.list.GetItemCount()
-        self.pathlist.insert(numitems, mp3filepath)
-        audio = MP3(mp3filepath)
-        self.list.InsertStringItem(numitems, '')
-        # TO IMPROVE
-        #try:
-        self.list.SetStringItem(numitems, 1, ''.join(audio["TRCK"]))
-        #except Exception:
-            #print 'No track'
-        self.list.SetStringItem(numitems, 2, ''.join(audio["TIT2"]))
-        self.list.SetStringItem(numitems, 3, ''.join(audio["TPE1"]))
-        self.list.SetStringItem(numitems, 4, ''.join(audio["TALB"]))
-        self.list.SetStringItem(numitems, 5, audio["TDRC"].text[0].get_text())
-        length = audio.info.length
-        hours = int(length // 3600)
-        minutes = int((length % 3600) // 60)
-        seconds = int(length % 60)
-        if hours > 0:
-            self.list.SetStringItem(numitems, 6,
-                                    '{0:02d}'.format(hours) +
-                                    ':{0:02d}'.format(minutes) +
-                                    ':{0:02d}'.format(seconds))
-        else:
-            self.list.SetStringItem(numitems, 6,
-                                    '{0:02d}'.format(minutes) +
-                                    ':{0:02d}'.format(seconds))
-
-    def IsMP3(self, filepath):
-        """Check if the file is a MP3 file."""
-        extension = os.path.splitext(filepath)[1]
-        return extension is ".mp3"'''
+    def on_select_all(self, event):
+        """Select all the children (artists) in the tree
+        :param event: event that triggers the function"""
+        if wx.Window.FindFocus() == self.tree:
+            self.select = False
+            child = self.tree.GetFirstChild(self.tree.GetRootItem())[0]
+            while child.IsOk():
+                next_sibling = self.tree.GetNextSibling(child)
+                if not next_sibling.IsOk():
+                    # Last item to select: allow trigger on_sel_changed
+                    self.select = True
+                self.tree.SelectItem(child)
+                child = next_sibling
+        elif wx.Window.FindFocus() == self.list:
+            idx = 0
+            while idx < self.list.GetItemCount():
+                self.list.Select(idx)
+                idx += 1
