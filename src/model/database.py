@@ -41,7 +41,8 @@ class Database(object):
         self.cursor.execute("DROP TABLE IF EXISTS Artist")
         self.cursor.execute('''CREATE TABLE Artist(
             art_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            art_name TEXT
+            art_name TEXT,
+            art_path TEXT
             )''')
         self.cursor.execute("DROP TABLE IF EXISTS Album")
         self.cursor.execute('''CREATE TABLE Album(
@@ -49,6 +50,7 @@ class Database(object):
             alb_name TEXT,
             alb_date TEXT,
             alb_cover TEXT,
+            alb_path TEXT,
             alb_art_id INTEGER,
             FOREIGN KEY(alb_art_id) REFERENCES Artist(art_id)
             )''')
@@ -68,20 +70,22 @@ class Database(object):
         if self.connection:
             self.connection.close()
 
-    def insert_artist(self, art_name):
+    def insert_artist(self, art_name, art_path):
         """Insert the artist into the database.
-        :param art_name: artist name"""
-        self.cursor.execute("INSERT INTO Artist VALUES (?, ?)",
-                            (None, art_name,))
+        :param art_name: artist name
+        :param art_path: artist directory path"""
+        self.cursor.execute("INSERT INTO Artist VALUES (?, ?, ?)",
+                            (None, art_name, art_path))
 
-    def insert_album(self, alb_name, alb_date, alb_cover, alb_art_id):
+    def insert_album(self, alb_name, alb_date, alb_cover, alb_path, alb_art_id):
         """Insert the album into the database.
         :param alb_name: album name
         :param alb_date: album date
         :param alb_cover: album cover
+        :param alb_path: album directory path
         :param alb_art_id: artist id"""
-        self.cursor.execute("INSERT INTO Album VALUES (?, ?, ?, ?, ?)",
-                            (None, alb_name, alb_date, alb_cover,
+        self.cursor.execute("INSERT INTO Album VALUES (?, ?, ?, ?, ?, ?)",
+                            (None, alb_name, alb_date, alb_cover, alb_path,
                              alb_art_id,))
 
     def insert_song(self, son_track, son_title, son_length, son_path,
@@ -112,6 +116,13 @@ class Database(object):
                             (art_name,))
         return self.cursor.fetchone()
 
+    def get_artist_by_id(self, art_id):
+        """Return the artist that matches the given id.
+        :param art_id: artist id"""
+        self.cursor.execute("SELECT * FROM Artist WHERE art_id=?",
+                            (art_id,))
+        return self.cursor.fetchone()
+
     def get_all_albums_by_artist(self, alb_art_id):
         """Return all the albums attached to the given artist.
         :param alb_art_id: artist id"""
@@ -120,13 +131,20 @@ class Database(object):
             ORDER BY alb_date, alb_name''', (alb_art_id,))
         return self.cursor.fetchall()
 
-    def get_album_by_name(self, alb_name, alb_art_id):
+    def get_album_by_name_and_artist(self, alb_name, alb_art_id):
         """Return the album which matches the given name and artist id.
         :param alb_name: album name
         :param alb_art_id: artist id"""
         self.cursor.execute(
             "SELECT alb_id FROM Album WHERE alb_name=? AND alb_art_id=?",
             (alb_name, alb_art_id,))
+        return self.cursor.fetchone()
+
+    def get_album_by_id(self, alb_id):
+        """Return the album which matches the album id.
+        :param alb_id: album id"""
+        self.cursor.execute(
+            "SELECT * FROM Album where alb_id=?", (alb_id,))
         return self.cursor.fetchone()
 
     def get_all_songs_by_album(self, son_alb_id):

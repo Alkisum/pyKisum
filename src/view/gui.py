@@ -11,9 +11,11 @@ import ConfigParser
 import math
 from wx.lib.pubsub import setuparg1
 from wx.lib.pubsub import pub as publisher
-from ..utils import config
-from ..controller import playlist
+from src.utils import config
+from src.controller import playlist
+from src.controller import filehandler
 from src.view import menubar
+from src.view import albumdir
 
 
 ID_BUTTON_PREVIOUS = wx.NewId()
@@ -57,8 +59,8 @@ class GUI(wx.Frame):
                           size=(FRAME_WIDTH, FRAME_HEIGHT))
 
         # Menu Bar
-        menu_bar = menubar.MenuBar()
-        self.SetMenuBar(menu_bar.get_menu_bar())
+        self.menu_bar = menubar.MenuBar()
+        self.SetMenuBar(self.menu_bar.get_menu_bar())
 
         # Status Bar
         self.status_bar = self.CreateStatusBar()
@@ -99,8 +101,7 @@ class GUI(wx.Frame):
         list_sizer.Add(self.list, 1, wx.EXPAND)
         tree_panel.SetSizer(tree_sizer)
         list_panel.SetSizer(list_sizer)
-        bottom_sizer.Add(splitter, 1,
-                         wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP | wx.BOTTOM, 10)
+        bottom_sizer.Add(splitter, 1, wx.EXPAND | wx.ALL, 10)
 
         # Shortcuts
         self.Bind(wx.EVT_MENU, self.on_select_all, id=ID_ACC_SELECT_ALL)
@@ -111,11 +112,13 @@ class GUI(wx.Frame):
         # Binds
         self.Bind(wx.EVT_SIZE, self.on_size)
         self.Bind(wx.EVT_MENU, self.on_refresh_library,
-                  menu_bar.get_refresh_library_item())
+                  self.menu_bar.get_refresh_library_item())
         self.Bind(wx.EVT_MENU, self.on_add_folder,
-                  menu_bar.get_add_folder_item())
+                  self.menu_bar.get_add_folder_item())
         self.Bind(wx.EVT_MENU, self.on_close,
-                  menu_bar.get_exit_item())
+                  self.menu_bar.get_exit_item())
+        self.Bind(wx.EVT_MENU, self.on_rename_album_directory,
+                  self.menu_bar.get_rename_album_directory_item())
         self.Bind(wx.EVT_CLOSE, self.on_close)
         self.Bind(wx.EVT_SPLITTER_SASH_POS_CHANGING,
                   self.resize_list, splitter)
@@ -133,46 +136,6 @@ class GUI(wx.Frame):
         # Flags
         self.select = True
         self.size_cnt = 0
-
-    def on_size(self, event):
-        """Update the position and size of the status bar gauge.
-        :param event: event that triggers the function"""
-        # List
-        self.resize_list("")
-        # Gauge
-        rect = self.status_bar.GetFieldRect(2)
-        self.gauge.SetPosition((rect.x + 2, rect.y + 2))
-        self.gauge.SetSize((rect.width - 3, rect.height - 3))
-        # EVT_SIZE propagation stopped -> need to reload the layout
-        self.Layout()
-
-    def resize_list(self, event):
-        """Resize the list's columns when its container is re-sized.
-        :param event: event that triggers the function"""
-        # Skip the 2 first size events
-        if self.size_cnt < 2:
-            list_width = LIST_WIDTH - LIST_FIXED_SIZE
-            self.size_cnt += 1
-        # After the 2 first events, get new list size
-        else:
-            list_width = self.list.GetSize()[0] - LIST_FIXED_SIZE
-        self.list.SetColumnWidth(0, 20)
-        self.list.SetColumnWidth(1, 30)
-        self.list.SetColumnWidth(2, math.trunc(list_width * (40.0 / 100)))
-        self.list.SetColumnWidth(3, math.trunc(list_width * (30.0 / 100)))
-        self.list.SetColumnWidth(4, math.trunc(list_width * (30.0 / 100)))
-        self.list.SetColumnWidth(5, 60)
-        self.list.SetColumnWidth(6, 80)
-
-    def on_close(self, event):
-        """Save the configuration and close the programme.
-        :param event: event that triggers the function"""
-        configfile = open(self.config_file_path, 'w')
-        self.config_parser.set("session", "library", self.library_location)
-        self.config_parser.set("session", "playlist",
-                               self.playlist.get_playlist_id_songs())
-        self.config_parser.write(configfile)
-        self.Destroy()
 
     def init_list(self):
         """Initialize the list."""
@@ -204,6 +167,98 @@ class GUI(wx.Frame):
                     self.lib.get_data_from_saved_playlist(song_id))
             self.playlist.update_playlist(songs_to_add)
             self.display_playlist()
+
+    def update_gauge(self, msg):
+        """Update gauge when loading a library.
+        :param msg: message to display in the status bar"""
+        self.gauge_counter += 1
+        self.status_bar.SetStatusText(msg.data, 1)
+        self.gauge.SetValue(self.gauge_counter)
+
+    def on_size(self, event):
+        """Update the position and size of the status bar gauge.
+        :param event: event that triggers the function"""
+        # List
+        self.resize_list("")
+        # Gauge
+        rect = self.status_bar.GetFieldRect(2)
+        self.gauge.SetPosition((rect.x + 2, rect.y + 2))
+        self.gauge.SetSize((rect.width - 3, rect.height - 3))
+        # EVT_SIZE propagation stopped -> need to reload the layout
+        self.Layout()
+
+    def resize_list(self, event):
+        """Resize the list's columns when its container is re-sized.
+        :param event: event that triggers the function"""
+        # Skip the 2 first size events
+        if self.size_cnt < 2:
+            list_width = LIST_WIDTH - LIST_FIXED_SIZE
+            self.size_cnt += 1
+        # After the 2 first events, get new list size
+        else:
+            list_width = self.list.GetSize()[0] - LIST_FIXED_SIZE
+        self.list.SetColumnWidth(0, 20)
+        self.list.SetColumnWidth(1, 30)
+        self.list.SetColumnWidth(2, math.trunc(list_width * (40.0 / 100)))
+        self.list.SetColumnWidth(3, math.trunc(list_width * (30.0 / 100)))
+        self.list.SetColumnWidth(4, math.trunc(list_width * (30.0 / 100)))
+        self.list.SetColumnWidth(5, 60)
+        self.list.SetColumnWidth(6, 80)
+
+    def on_sel_changed(self, event):
+        """Update list when the selection in the tree changes.
+        :param event: event that triggers the function"""
+        if self.select:
+            # Clear selected album list (used for Rename Album Directory)
+            self.lib.clear_sel_album_list()
+            # Update the playlist
+            songs_to_add = []
+            for item in self.tree.GetSelections():
+                if not self.tree.IsSelected(self.tree.GetItemParent(item)):
+                    songs_to_add.append(self.lib.get_data_from_selected_item(
+                                        self.tree.GetItemPyData(item)))
+            self.playlist.update_playlist(songs_to_add)
+            # Display the updated playlist in the list
+            self.display_playlist()
+            # Enable or disable menu items
+            if self.lib.get_sel_album_list():
+                self.menu_bar.enable_rename_album_directory_item(True)
+            else:
+                self.menu_bar.enable_rename_album_directory_item(False)
+
+    def display_playlist(self):
+        """Display the playlist in the list."""
+        self.list.DeleteAllItems()
+        idx = 0
+        for item in self.playlist.get_playlist():
+            for song in item:
+                self.list.InsertStringItem(idx, '')
+                self.list.SetStringItem(idx, 1, song[1])
+                self.list.SetStringItem(idx, 2, song[2])
+                self.list.SetStringItem(idx, 3, song[3])
+                self.list.SetStringItem(idx, 4, song[4])
+                self.list.SetStringItem(idx, 5, song[5])
+                self.list.SetStringItem(idx, 6, song[6])
+                idx += 1
+
+    def on_select_all(self, event):
+        """Select all the children (artists) in the tree
+        :param event: event that triggers the function"""
+        if wx.Window.FindFocus() == self.tree:
+            self.select = False
+            child = self.tree.GetFirstChild(self.tree.GetRootItem())[0]
+            while child.IsOk():
+                next_sibling = self.tree.GetNextSibling(child)
+                if not next_sibling.IsOk():
+                    # Last item to select: allow trigger on_sel_changed
+                    self.select = True
+                self.tree.SelectItem(child)
+                child = next_sibling
+        elif wx.Window.FindFocus() == self.list:
+            idx = 0
+            while idx < self.list.GetItemCount():
+                self.list.Select(idx)
+                idx += 1
 
     def on_refresh_library(self, event):
         """Refresh the library.
@@ -259,58 +314,35 @@ class GUI(wx.Frame):
                     item_song = self.tree.AppendItem(
                         item_album, track + song[2])
                     self.tree.SetItemPyData(item_song, ['Song', song[0]])
+        # Disable the rename album directory item (no album selected at startup)
+        self.menu_bar.enable_rename_album_directory_item(False)
 
-    def update_gauge(self, msg):
-        """Update gauge when loading a library.
-        :param msg: message to display in the status bar"""
-        self.gauge_counter += 1
-        self.status_bar.SetStatusText(msg.data, 1)
-        self.gauge.SetValue(self.gauge_counter)
-
-    def on_sel_changed(self, event):
-        """Update list when the selection in the tree changes.
+    def on_close(self, event):
+        """Save the configuration and close the programme.
         :param event: event that triggers the function"""
-        if self.select:
-            # Update the playlist
-            songs_to_add = []
-            for item in self.tree.GetSelections():
-                if not self.tree.IsSelected(self.tree.GetItemParent(item)):
-                    songs_to_add.append(self.lib.get_data_from_selected_item(
-                                        self.tree.GetItemPyData(item)))
-            self.playlist.update_playlist(songs_to_add)
-            # Display the updated playlist in the list
-            self.display_playlist()
+        configfile = open(self.config_file_path, 'w')
+        self.config_parser.set("session", "library", self.library_location)
+        self.config_parser.set("session", "playlist",
+                               self.playlist.get_playlist_id_songs())
+        self.config_parser.write(configfile)
+        self.Destroy()
 
-    def display_playlist(self):
-        """Display the playlist in the list."""
-        self.list.DeleteAllItems()
-        idx = 0
-        for item in self.playlist.get_playlist():
-            for song in item:
-                self.list.InsertStringItem(idx, '')
-                self.list.SetStringItem(idx, 1, song[1])
-                self.list.SetStringItem(idx, 2, song[2])
-                self.list.SetStringItem(idx, 3, song[3])
-                self.list.SetStringItem(idx, 4, song[4])
-                self.list.SetStringItem(idx, 5, song[5])
-                self.list.SetStringItem(idx, 6, song[6])
-                idx += 1
-
-    def on_select_all(self, event):
-        """Select all the children (artists) in the tree
+    def on_rename_album_directory(self, event):
+        """Rename album directory according to expression entered by user.
         :param event: event that triggers the function"""
-        if wx.Window.FindFocus() == self.tree:
-            self.select = False
-            child = self.tree.GetFirstChild(self.tree.GetRootItem())[0]
-            while child.IsOk():
-                next_sibling = self.tree.GetNextSibling(child)
-                if not next_sibling.IsOk():
-                    # Last item to select: allow trigger on_sel_changed
-                    self.select = True
-                self.tree.SelectItem(child)
-                child = next_sibling
-        elif wx.Window.FindFocus() == self.list:
-            idx = 0
-            while idx < self.list.GetItemCount():
-                self.list.Select(idx)
-                idx += 1
+        # Open new dialog
+        dia = albumdir.AlbumDir(self, "Rename Album Directory")
+        dia.ShowModal()
+
+    def rename_album_directory(self, expr):
+        """Triggered when the user click on the rename button in the
+        Rename Album Directory.
+        :param expr: expression given by user to rename the album directory"""
+        album_list = self.lib.get_sel_album_list()
+        self.gauge_counter = 0
+        self.gauge.SetRange(len(album_list))
+        self.gauge.Show()
+        filehandler.FileHandler.rename_albums(self.lib, expr)
+        self.status_bar.SetStatusText("", 1)
+        self.gauge.Hide()
+        self.on_refresh_library("")
